@@ -6,7 +6,11 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "menu": "node src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:tools": "node src/tests/tools.test.js",
+    "test:register": "node src/tests/register.test.js",
+    "test:initialize": "node src/tests/initialize.test.js"
   },
   "keywords": ["hedera", "hashgraph", "agent", "hcs-10", "openconvai"],
   "author": "",
