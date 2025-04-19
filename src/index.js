@@ -11,19 +11,28 @@ import {
   MessagesPlaceholder,
 } from '@langchain/core/prompts';
 import { ConversationTokenBufferMemory } from 'langchain/memory';
+import logger from './utils/logger.js';
+import { applyConsolePatch } from './utils/console-patch.js';
 
 dotenv.config();
 
+// Apply console patch to intercept and format logs from libraries
+applyConsolePatch();
+
+// Default log level from environment or set to INFO
+const logLevel = process.env.LOG_LEVEL || 'INFO';
+logger.configure({ level: logLevel });
+
 async function main() {
-  console.log('Initializing Hedera agent with HCS-10 OpenConvAI Standard...');
+  logger.info('Initializing Hedera agent with HCS-10 OpenConvAI Standard...', 'Main');
   
   // 1. Initialize the HCS Client and get all tools using the enhanced function
   const operatorId = process.env.HEDERA_ACCOUNT_ID;
   const operatorKey = process.env.HEDERA_PRIVATE_KEY;
   const network = process.env.HEDERA_NETWORK || 'testnet';
   
-  console.log(`- Network: ${network}`);
-  console.log(`- Account ID: ${operatorId}`);
+  logger.info(`- Network: ${network}`, 'Config');
+  logger.info(`- Account ID: ${operatorId}`, 'Config');
   
   // Initialize with state management for connections
   const initResult = await initializeHCS10Client({
@@ -45,7 +54,8 @@ async function main() {
   if (tools.findRegistrationsTool) {
     const originalInvoke = tools.findRegistrationsTool.invoke;
     tools.findRegistrationsTool.invoke = async (params) => {
-      console.log('Original search params:', params);
+      logger.debug('Original search params:', 'FindTool');
+      logger.debug(JSON.stringify(params), 'FindTool');
       
       // If trying to search with tags or type but no nameQuery, convert to nameQuery
       const newParams = { ...params };
@@ -62,17 +72,26 @@ async function main() {
         delete newParams.accountId;
       }
       
-      console.log('Modified search params:', newParams);
-      return originalInvoke.call(tools.findRegistrationsTool, newParams);
+      logger.debug('Modified search params:', 'FindTool');
+      logger.debug(JSON.stringify(newParams), 'FindTool');
+      
+      const results = await originalInvoke.call(tools.findRegistrationsTool, newParams);
+      
+      // Use the specialized search results logger
+      if (newParams.nameQuery) {
+        logger.searchResults(results, newParams.nameQuery);
+      }
+      
+      return results;
     };
   }
   
   // 2. Extract all available tools and filter out undefined ones
   const availableTools = Object.values(tools).filter(Boolean);
   
-  console.log(`Available tools: ${availableTools.length}`);
+  logger.info(`Available tools: ${availableTools.length}`, 'Tools');
   availableTools.forEach(tool => {
-    console.log(`- ${tool.name}: ${tool.description.substring(0, 50)}...`);
+    logger.debug(`- ${tool.name}: ${tool.description.substring(0, 50)}...`, 'Tools');
   });
 
   // 3. Set up the LangChain agent with a comprehensive prompt
@@ -125,23 +144,27 @@ async function main() {
   ]);
 
   const agent = await createOpenAIToolsAgent({ llm, tools: availableTools, prompt });
+  
+  // Check if verbose debugging is enabled in environment (default to false)
+  const verboseDebug = process.env.VERBOSE_DEBUG === 'true';
+  
   const agentExecutor = new AgentExecutor({
     agent,
     tools: availableTools,
     memory,
-    verbose: true,
+    verbose: verboseDebug, // Only show verbose logs if explicitly enabled
   });
 
   // 4. Start the connection monitor to handle incoming requests
   const monitorTool = tools.connectionMonitorTool;
   if (monitorTool) {
-    console.log('Starting connection monitor...');
+    logger.info('Starting connection monitor...', 'Monitor');
     // Monitor for 5 minutes (300 seconds)
     monitorTool.invoke({
       monitorDurationSeconds: 300,
       acceptAll: false // Don't automatically accept all connections
     }).catch(error => {
-      console.error('Connection monitor error:', error);
+      logger.error(`Connection monitor error: ${error}`, 'Monitor');
     });
   }
 
@@ -189,7 +212,7 @@ async function main() {
       case '2': // Register New Agent
         rl.question('Enter agent name (default: FaustoAgent): ', async (name) => {
           name = name.trim() || 'FaustoAgent';
-          console.log(`Registering agent as '${name}'...`);
+          logger.info(`Registering agent as '${name}'...`, 'Registration');
           
           try {
             const result = await agentExecutor.invoke({
@@ -206,7 +229,7 @@ async function main() {
                 if (credentialsMatch && credentialsMatch[1]) {
                   credentials = JSON.parse(credentialsMatch[1]);
                   registered = true;
-                  console.log('\nIMPORTANT: Agent credentials found and saved.');
+                  logger.info('\nIMPORTANT: Agent credentials found and saved.', 'Registration');
                   
                   // Save to file
                   const fs = await import('fs');
@@ -215,18 +238,18 @@ async function main() {
                     filename, 
                     JSON.stringify(credentials, null, 2)
                   );
-                  console.log(`Credentials saved to ${filename}`);
+                  logger.info(`Credentials saved to ${filename}`, 'Registration');
                   
                   // Update the agent's identity
-                  console.log('Updating agent identity with new credentials...');
+                  logger.info('Updating agent identity with new credentials...', 'Registration');
                   hcs10Client.setClient(credentials.accountId, credentials.privateKey);
                 }
               } catch (parseError) {
-                console.log('Could not extract credentials as JSON. Please check the output above.');
+                logger.error('Could not extract credentials as JSON. Please check the output above.', 'Registration');
               }
             }
           } catch (error) {
-            console.error('Registration failed:', error);
+            logger.error(`Registration failed: ${error}`, 'Registration');
           }
           
           displayMenu();
@@ -243,7 +266,7 @@ async function main() {
             console.log('\nAgent Output:');
             console.log(result.output);
           } catch (error) {
-            console.error('Search failed:', error);
+            logger.error(`Search failed: ${error}`, 'Search');
           }
           
           displayMenu();
@@ -260,7 +283,7 @@ async function main() {
             console.log('\nAgent Output:');
             console.log(result.output);
           } catch (error) {
-            console.error('Connection failed:', error);
+            logger.error(`Connection failed: ${error}`, 'Connection');
           }
           
           displayMenu();
@@ -278,7 +301,7 @@ async function main() {
               console.log('\nAgent Output:');
               console.log(result.output);
             } catch (error) {
-              console.error('Sending message failed:', error);
+              logger.error(`Sending message failed: ${error}`, 'Messaging');
             }
             
             displayMenu();
@@ -295,7 +318,7 @@ async function main() {
           console.log('\nAgent Output:');
           console.log(result.output);
         } catch (error) {
-          console.error('Checking messages failed:', error);
+          logger.error(`Checking messages failed: ${error}`, 'Messaging');
         }
         
         displayMenu();
@@ -311,10 +334,10 @@ async function main() {
             console.log('\nAgent Output:');
             console.log(result.output);
           } catch (error) {
-            console.error('Getting profile failed:', error);
+            logger.error(`Getting profile failed: ${error}`, 'Profile');
           }
         } else {
-          console.log('You need to register an agent first (option 2).');
+          logger.warn('You need to register an agent first (option 2).', 'Profile');
         }
         
         displayMenu();
@@ -330,23 +353,23 @@ async function main() {
             console.log('\nAgent Output:');
             console.log(result.output);
           } catch (error) {
-            console.error('Listing connections failed:', error);
+            logger.error(`Listing connections failed: ${error}`, 'Connection');
           }
         } else {
-          console.log('You need to register an agent first (option 2).');
+          logger.warn('You need to register an agent first (option 2).', 'Connection');
         }
         
         displayMenu();
         break;
         
       case '0': // Exit
-        console.log('Exiting...');
+        logger.info('Exiting...', 'Main');
         rl.close();
         process.exit(0);
         break;
         
       default:
-        console.log('Invalid option. Please try again.');
+        logger.warn('Invalid option. Please try again.', 'Menu');
         displayMenu();
         break;
     }
@@ -363,18 +386,29 @@ async function main() {
       try {
         const result = await agentExecutor.invoke({ input });
         
-        console.log('\nAgent:', result.output);
+        // Print a clean divider between user input and agent response
+        console.log('\n' + '─'.repeat(50) + '\n');
+        
+        // Display agent response without "Agent:" prefix
+        console.log(result.output);
+        
+        // Print divider after response
+        console.log('\n' + '─'.repeat(50));
+        
         startChatMode(); // Continue chat mode
       } catch (error) {
-        console.error('Error in chat:', error);
+        logger.error(`Error in chat: ${error}`, 'Chat');
         startChatMode();
       }
     });
   }
 
   // Start with the menu
-  console.log('\nAgent initialized and ready!');
+  logger.info('\nAgent initialized and ready!', 'Main');
   displayMenu();
 }
 
-main().catch(console.error); 
+// Run the main function
+main().catch(error => {
+  logger.error(`Unhandled error: ${error}`, 'Main');
+}); 
