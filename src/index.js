@@ -13,6 +13,7 @@ import {
 import { ConversationTokenBufferMemory } from 'langchain/memory';
 import logger from './utils/logger.js';
 import { applyConsolePatch } from './utils/console-patch.js';
+import { WeatherTool } from './tools/customTools.js';
 
 dotenv.config();
 
@@ -89,6 +90,10 @@ async function main() {
   // 2. Extract all available tools and filter out undefined ones
   const availableTools = Object.values(tools).filter(Boolean);
   
+  // Agregar nuestras herramientas personalizadas al conjunto de herramientas
+  const weatherTool = new WeatherTool();
+  availableTools.push(weatherTool);
+  
   logger.info(`Available tools: ${availableTools.length}`, 'Tools');
   availableTools.forEach(tool => {
     logger.debug(`- ${tool.name}: ${tool.description.substring(0, 50)}...`, 'Tools');
@@ -120,6 +125,7 @@ async function main() {
       - List your existing connections (use list_connections)
       - Send messages to connected agents (use send_message_to_connection)
       - Check for received messages (use check_messages)
+      - Get weather information for a city (use get_weather)
       
       When a user asks you to interact with another agent, you should:
       1. Search for the agent by name or category
@@ -134,6 +140,9 @@ async function main() {
       
       DO NOT use tags, type, or accountId parameters for name searches.
       NEVER use tags: ["finance"] or similar formats - this will cause errors.
+      
+      For weather information, use the get_weather tool with a city name and optionally a country name.
+      Example: get_weather with city: "Madrid", country: "Spain"
       
       Be proactive in completing complex requests. Break down tasks into logical steps.
       When registering, select appropriate capabilities that match your purpose.`
@@ -188,11 +197,12 @@ async function main() {
     console.log('4. Connect with Agent');
     console.log('5. Send Message to Agent');
     console.log('6. Check Received Messages');
+    console.log('7. Get Weather Information');
     
     // Additional options if an agent is registered
     if (registered) {
-      console.log('7. View My Agent Profile');
-      console.log('8. List My Connections');
+      console.log('8. View My Agent Profile');
+      console.log('9. List My Connections');
     }
     
     console.log('0. Exit');
@@ -324,7 +334,26 @@ async function main() {
         displayMenu();
         break;
         
-      case '7': // View Agent Profile
+      case '7': // Get Weather Information
+        rl.question('Enter city name: ', (city) => {
+          rl.question('Enter country name (optional): ', async (country) => {
+            try {
+              const result = await agentExecutor.invoke({
+                input: `What's the weather in ${city}${country ? ', ' + country : ''}?`,
+              });
+              
+              console.log('\nAgent Output:');
+              console.log(result.output);
+            } catch (error) {
+              logger.error(`Weather retrieval failed: ${error}`, 'Weather');
+            }
+            
+            displayMenu();
+          });
+        });
+        break;
+        
+      case '8': // View Agent Profile
         if (registered) {
           try {
             const result = await agentExecutor.invoke({
@@ -343,7 +372,7 @@ async function main() {
         displayMenu();
         break;
         
-      case '8': // List Connections
+      case '9': // List Connections
         if (registered) {
           try {
             const result = await agentExecutor.invoke({
